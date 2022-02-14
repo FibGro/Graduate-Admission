@@ -1,0 +1,900 @@
+---
+title: "Graduate Admission"
+author: "Fibry Gro"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output: 
+  rmdformats::downcute:
+    toc_depth: 3
+    toc_float: 
+        collapsed: True
+    highlight: tango
+---
+
+
+# Introduction 
+
+```{r, echo=FALSE, fig.height=8}
+knitr::include_graphics("Ad.png")
+#https://poetsandquants.com/2014/07/29/the-case-for-applying-to-one-school/
+```
+
+The graduate admissions process is important to control the quality of university education. An objective of the present study is to predict a change of admission to Master's program. In real-life, it can be a student's guideline to get a chance at their desired university. Several factors contribute to an admission process, such as  GRE score, TOEFL score, university rating, statement of purpose, GPA, and research experience. 
+
+The project is part of the learning by the building of the linear regression model section. Linear regression is a technique in which the correlation between the target and predictor variables is assumed to be linear. We predict a change of admit by using simple and multiple linear regression methods in combination with the stepwise method. Then, we evaluate different models to get the best model based on R-squared value and mean error. Last, we investigate the assumption for the regression model. Bottom line, the project could help us to answer the following questions:
+
+- Which of the variables have a significant impact on the chance of admit
+- Which is the most important driver of a chance of admit
+- How do the variables interact with each other
+- What is the prediction of the chance of admit based on input parameters. 
+
+# Dataset Information 
+
+The data set is collected from [the Kaggle website](https://www.kaggle.com/mohansacharya/graduate-admissions). We will analyse 6 variables in 400 student records to predict the chance of admit in a Master's program in the university. The variables included are:
+
+- GRE Scores ( out of 340 )
+- TOEFL Scores ( out of 120 )
+- University Rating ( out of 5 )
+- Statement of Purpose ( out of 5 )
+- Letter of Recommendation Strength ( out of 5 )
+- Undergraduate GPA ( out of 10 )
+- Research Experience ( either 0 or 1 )
+- Chance of Admit ( ranging from 0 to 1 )
+
+# Exploratory Data
+
+## Attach Libraries
+
+The following are all libraries used in this project. 
+
+```{r,warning=FALSE,message=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(tidyr)
+library(GGally)
+library(corrplot)
+library(hrbrthemes)
+library(wesanderson)
+library(MASS)
+library(car)
+library(lmtest)
+library(MLmetrics)
+library(performance)
+library(quantreg)
+```
+
+## Read Data Frame
+
+Read the dataset and assign it as an object called `admission`. 
+
+```{r}
+admission <- read.csv("Admission_Predict.csv")
+```
+
+## Observe Data Frame
+
+Observe the dataframe by using `glimpse()`.
+
+- There are 400 rows and 9 columns of data set. 
+- Data type for all columns is numeric. 
+
+```{r}
+glimpse(admission)
+```
+## Check Missing Value
+
+Check missing value with `colSums()` and `is.na()`. 
+
+- There are no missing values in this data set.
+
+```{r}
+sum3 <-as.data.frame(colSums(is.na(admission)))
+```
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(sum3)
+```
+
+## Transform Dataframe 
+
+Several actions need to be done in this section: 
+
+- Drop the `Serial.No.`, 
+- Change `Research` datatype into factor 
+- Rename `Change.of.Admit` to `Admit`. 
+- Assign changes to dataframe `admission`. 
+
+```{r}
+admission <- admission %>% 
+  dplyr::select(-Serial.No.) %>% 
+  mutate(Research=as.factor(Research)) %>% 
+  rename(Admit = Chance.of.Admit)
+```
+
+## Correlation 
+
+Check the correlation between each variables by using `ggcorr()`. 
+
+```{r warning=FALSE}
+ggcorr(admission, 
+       label = T, 
+       label_size = 2.5, 
+       cex = 2.6)
+```
+
+> Insight :
+>
+- Most variables have a strong positive correlation with each other. 
+- CGPA has the highest positive correlation with Admit, followed by TOEFL and GRE score. 
+
+## Distribution And Outliers 
+
+We would like to know a distribution and also outlier for each variable by creating a boxplot.
+
+```{r}
+# Transform the dataset into longer direction by using `pivot_longer()` and assign it as new dataframe called `admission.long`
+admission.long <- pivot_longer(data = admission,
+                               cols = c(GRE.Score, TOEFL.Score, University.Rating, SOP, LOR, CGPA, Admit))
+
+# Create boxplot from dataframe 'admission.long'.
+admission.long %>% 
+ggplot(aes(x = value, fill=name)) +
+  geom_boxplot(color="black")+
+  facet_wrap(~name, scales = "free")+
+  theme_bw()+
+  scale_fill_manual(values = wes_palette(21, name = "Darjeeling1", type = "continuous"))+
+  labs(title="Boxplot For Each Variables",
+       y="",
+       x="Values")+
+      
+      theme_set(theme_minimal() + theme(text = element_text(family="Arial Narrow"))) +
+      theme(plot.title = element_text(size= 17, color = 'black'),
+            axis.title.x = element_text(size=12, color = 'black'),
+            axis.title.y = element_text(size = 12, color = 'black'),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.line = element_line(colour = "black"),
+            legend.position = "")+
+    theme(strip.background =element_rect(fill="black"))+
+    theme(strip.text = element_text(colour = 'white'))
+```
+
+> Insight:
+>
+- There are outliers in variables Admit, LOR and CGPA. Most outliers lie in the low value. 
+- The value of the target variable (Admit) mostly distributes between 0.64 and 0.72, with a median approximately at 0.73. 
+- GRE and University ratings have a normal distribution. While the others variable have a left skew dsitribution. 
+
+# Linear Regression
+
+In this section, we create a linear model regression based on a different number of predictor.
+
+- First part: We construct the linear model regression with target variable is Admit and variable predictors are other variables. We name the model as `model_ad_all`. 
+- Second part: We construct the linear model regression with target variable is Admit and variable predictors are variables that have a significant p-value as described in `model_ad_all`. We call the model as `model_ad_few`.
+- Third part: We construct two linear model regression (`model_ad_with` and `model_ad_without`) with the target variable is Admit and the variable predictor is CGPA. In this section, we examine the leverage of variable predictor and its influence on the model.
+
+## First Part (All Variables)
+
+The multiple linear regression will be used to model the relationship between multiple scalar responses (predictor variables) and the target variable. We use the whole dataset regression to find the coefficient estimates of different factors. 
+
+```{r}
+# Create a model with target variable (Admit) and predictor variables of the other columns by using `lm()` and assign as `model_ad_all`
+model_ad_all <- lm(Admit~., admission)
+
+# Observe summary of the model by using `summary()`
+summary(model_ad_all)
+```
+
+>Insight: 
+>
+- The adjusted R-squared is 0.80, implying that predictor variables can describe 80% chance of admit, the rest is explained by other variables that are not included in the model.
+- GRE, TOEFL, LOR, CGPA and Research1 have a significant p-value, meaning that those variables tend to have a strong correlation with the Admit.
+- Most of predictor (except SOP) has a positive correlation with Admit. It is confirmed by the positive value of the coefficient number.
+
+## Second Part (Few Variables)
+
+In this part, we will create multiple linear regression by using predictor variables that have a significant p-value based on `model_ad_all`. Then, assign it as a new model called `model_ad_few`. 
+
+```{r}
+# Create a linear regression model with name `model_ad_few` 
+model_ad_few <- lm(Admit~GRE.Score+TOEFL.Score+LOR+CGPA+Research, admission)
+
+# Observe a summary of the model
+summary(model_ad_few)
+```
+
+>Insight: 
+>
+- The adjusted R-squared is 0.8002, implying that predictor variables can interpret 80.02% target variable, the rest is explained by other variables that are not included in the model.
+- All predictors in the model have a significant p-value, implying that predictors tend to have a strong correlation with the Admit.
+
+## Third Part (One Predictor)
+
+In this part, we create a linear model regression with only one variable predictor, which is CGPA. 
+Also, we would like to observe the leverage of the outlier in variable CGPA and its influence to the model. 
+
+- Create a boxplot to examine the outliers. 
+- Drop the outliers in CGPA and assign it to a new dataframe called `ad.out`. 
+- Create a linear model regression without aoutliers called `model_ad_without`.
+- Compare coefficient and multiple R-square between `model_ad_without` and `model_ad_with`.
+
+Let's call all outliers in CGPA. 
+
+```{r}
+boxplot(admission$Admit)$out
+```
+
+There are 2 outliers and the value of the outliers is 0.34.
+Drop the outliers by filtering the value in CGPA that is more than 0.34. Then, assign it as a new object called `ad_out`. 
+
+```{r}
+# Drop outliers from admission and assign as dataframe 'ad.out'
+ad.out <- admission %>% 
+  filter(CGPA > 0.34)
+
+# Create a `model_ad_without` 
+model_ad_without <- lm(Admit~CGPA, ad.out)
+
+# Observe summary of the model 
+summary(model_ad_without)
+```
+
+Create a linear regression model (`model_ad_without`) with the variable target is Admit and the variable predictor is CGPA from data frame `admission`
+
+```{r}
+# Create a `model_ad_without``
+model_ad_with <- lm(Admit~CGPA, admission)
+
+# Observe a summary of the model
+summary(model_ad_with)
+```
+Create a summary table of `model_ad_without` (without outliers) and `model_ad_with` (with outliers). 
+
+```{r, echo=FALSE}
+
+sum_one <- list(
+  "Models" = c("Model without outliers", "Model with outliers"), 
+  
+  "Multiple R.Squared" = c(round(summary(model_ad_without)$r.squared,2),
+                           round(summary(model_ad_with)$r.squared,2)),
+  
+  "Intercept" = c(round(model_ad_without$coefficients[1],2), 
+            round(model_ad_with$coefficients[1],2)),
+  
+  "Coefficient" = c(round(model_ad_without$coefficients[2],2), 
+            round(model_ad_with$coefficients[2],2)))
+
+sum_one<- as.data.frame(sum_one)
+rmarkdown::paged_table(sum_one)
+
+```
+
+Now, let's observe both regression models and its regression lines by creating a scatter plot.  
+
+```{r}
+plot(admission$CGPA, admission$Admit,
+     xlab = "CGPA", 
+     ylab = "Admit",
+     main = "Correlation Between Change to Admit and CGPA")
+
+# Create abline
+abline(model_ad_without, col="red", lwd=3, lty=2)
+abline(model_ad_with, col="green", lwd=1, lty=1)
+```
+
+>Insight: 
+>
+- Based on coefficients value, CGPA has a positive relationship with Admit. 
+- The regression line and slope are similar for both models, as shown in the scatterplot and coefficient value. It implies that models with and without outliers have high leverage and low influence conditions. 
+- Multiple R-squared = 0.7626, implying CGPA can explain 76.26% of the chance of admit in the admission data set.
+- Interpretation model_ad_with (with outliers) : 
+  Estimated chance of admit = -1.07151 +  0.20885 * CGPA. 
+  One unit increase in CGPA is equivalent to a 0.20885 points increase in the perceived chance of admit. 
+
+
+## Model Evaluation
+
+Compare four models based on the adjusted R-squared and Root Mean Square Error. 
+
+```{r, echo=FALSE}
+
+sum1 <- list(
+  "Models" = c("All variables as predictor model", "Few variables as predictor model", "One variable with outliers", "One variable without outliers"), 
+  
+  "Adjusted R.Squared" = c(round(summary(model_ad_all)$adj.r.squared,4),
+                           round(summary(model_ad_few)$adj.r.squared,4),
+                           round(summary(model_ad_with)$adj.r.squared,4),
+                           round(summary(model_ad_without)$adj.r.squared,4)),
+  
+  "RMSE" = c(MLmetrics::RMSE(y_pred=model_ad_all$fitted.values, y_true=admission$Admit), 
+             MLmetrics::RMSE(y_pred=model_ad_few$fitted.values, y_true=admission$Admit),
+             MLmetrics::RMSE(y_pred=model_ad_with$fitted.values, y_true=admission$Admit),
+             MLmetrics::RMSE(y_pred=model_ad_without$fitted.values, y_true=admission$Admit)))
+
+sum1<- as.data.frame(sum1)
+rmarkdown::paged_table(sum1)
+
+```
+
+> Insight: Model with few variables as predictors have the highest value of adjusted R-squared. However, model with all variables as predictor has the lowest error value (RMSE). In this case, I would choose the model with few variables as predictors, since the good model also considers simplicity. 
+
+## Model Interpretation 
+
+Interpretation of a linear model regression with few variables as predictor. 
+
+**Chance to Admit = -1.2984 + 0.0018 * GRE.Score + 0.0030 * TOEFL.Score + 0.0227 * LOR + 0.1210 * CGPA +  0.0245 * Research1**
+
+- One unit increases in GRE Score, will increase 0.0018 chance of admit. 
+- One unit increases in TOEFL Score, will increase 0.0030 chance of admit. 
+- One unit increases in LOR, will increase 0.0227 chance of admit. 
+- One unit increases in CGPA, will increase 0.1210 chance of admit. 
+- One unit increases in Research1, will increase 0.0245 chance of admit. 
+
+# Stepwise Regression 
+
+In this section, we would like to compare three methods of stepwise linear regression (backward, forward and both). Stepwise regression is the step-by-step iterative construction of a regression model that involves the selection of variables predictor to be used in a final model. 
+
+## Backward Method
+
+Backward regression involves removing potential variables predictor in succession and testing for statistical significance after each iteration until the lowest AIC is achieved. 
+
+```{r}
+
+# Create a linear model regression with backward stepwise method. 
+model_ad_backward <- step(object=model_ad_all, 
+                          direction="backward", 
+                          trace = 0)
+
+# Observe a summary of the model 
+summary(model_ad_backward)
+```
+## Forward Method
+
+Forward regression involves adding potential variable predictors in succession and testing for statistical significance after each iteration until the lowest AIC is achieved. 
+
+```{r}
+# Create a linear model regression without variable predictor. 
+model_ad_non <- lm(Admit~1, admission)
+
+# Create a linear model regression with forward stepwise method. 
+model_ad_forward <- step(object=model_ad_non, 
+                          direction="forward",
+                          scope=list(upper=model_ad_all,
+                                     lower=model_ad_non), trace=0)
+
+# Observe a summary of the model
+summary(model_ad_forward)
+```
+
+## Both Method
+
+Both stepwise regression is combination between backward and forward method. 
+
+```{r}
+# Create a linear model regression with both stepwise method. 
+model_ad_both<- step(object=model_ad_non, 
+                          direction="both",
+                          scope=list(upper=model_ad_all,
+                                     lower=model_ad_non),
+                     trace=0)
+
+# Observe a summary of the model
+summary(model_ad_both)
+```
+## Model Evaluation 
+
+
+```{r}
+compare_performance(model_ad_backward, model_ad_forward, model_ad_both)
+```
+> Insight: 
+> 
+- All models show a similar result of adjusted R-squared value, AIC and RMSE. 
+- The adjusted R-squared value of 80.30%, implies that the variables predictor could explain 80.30% of variable target. 
+- The RMSE value is 0.063. It is implied that the number is relatively small compared to Admit ranges, which is between 0.34 and 0.97. 
+- Since the R-squared value is relatively high and RMSE is considered small, we can justify that the model is relatively good. In this case, we will use `model_ad_backward` as our model. However, we should test our model with a few linear model assumptions. Let's move on.
+
+
+## Model Interpretation 
+
+Model interpretation for model_ad_backward is : 
+
+**Chance to admit = -1.2984 + 0.0018 * GRE.Score + 0.0030 * TOEFL.Score + 0.0227 * LOR + 0.1210 * CGPA + 0.0246 * Research1**
+
+- One unit increases in GRE Score, increases 0.0018 chance of admit. 
+- One unit increases in TOEFL Score, increases 0.0030 chance of admit. 
+- One unit increases in LOR, increases 0.0227 chance of admit. 
+- One unit increases in CGPA, increases 0.0227 chance of admit. 
+- One unit increases in Research1, increases 0.0246 chance of admit. 
+
+
+# Assumptions 
+
+The following are assumptions of linear regression: 
+
+- There must be a linear relation between target and predictor variables (linearity)
+- Absence of heteroscedasticity (Homoscedasticity)
+- Error terms should be normally distributed with mean 0 and constant variance (Normality of Residual)
+- Absence of multicollinearity and auto-correlation (Multicollinearity)
+
+## Linearity 
+
+The linearity assumption is that the correlation between variables predictor and the variable target is assumed to be linear. We will use `cor.test()` to check the p-value of variable predictors in model_ad_backward. The p-value should be less than alpha (p-value < 0.05) so that we will reject the $H_0$. Linearity hypothesis test: 
+
+$$
+H_0: correlation\ is\ not\ significant\\
+H_1: correlation\ is\ significant
+$$
+
+
+```{r}
+cor.test(admission$CGPA, admission$Admit)
+cor.test(admission$GRE.Score, admission$Admit)
+cor.test(admission$TOEFL.Score, admission$Admit)
+cor.test(admission$SOP, admission$Admit)
+cor.test(admission$LOR, admission$Admit)
+```
+
+> Insight: Since the p-value of variable predictors in the model is less than alpha (Reject the $H_0$), we can assume that there is a linear relationship between predictors and the target variable. 
+
+## Normality Of Residual
+
+Residuals of the model should have a normal distribution and its values should be distributed within zero. To check this assumption, we could use visualization by using a histogram of residuals and a statistic test by using `Shapiro.test()`. The expectation is to have a p-value higher than alpha (p-value > 0.05) so that we can accept the $H_0$.   
+
+$$
+H_0: error\ is\ normally\ distributed\\
+H_1: error\ is\ not\ normally\ distributed\\
+$$
+
+```{r}
+shapiro.test(model_ad_backward$residuals)
+```
+
+> Insight: Since the p-value is lower than 0.05 (Reject the $H_0$), the residual in the model is not normally distributed. It implies that the model violates the residual normality assumption. 
+
+## Homoscedasticity Of Residual
+
+Based on Investopedia, Homoskedastic (also spelt "homoscedastic") is a condition in which the variance of the residual, in a regression model, is constant. The error term does not vary much as the value of the predictor variable changes. To observe the homoscedasticity, we can use a scatter plot between model residuals and the model prediction and statistic test with Breusch-Pagan. The expectation from the test is to have a p-value higher than alpha (p-value > 0.05), so that we can accept the $H_0$.  
+
+$$
+H_0: Error\ variances\ is\ constant\ (Homoscedasticity)\\
+H_1: Error\ variance\ is\ not\ constant\ (Heteroscedasticity)
+$$
+
+
+```{r}
+plot(x = model_ad_backward$fitted.values, y = model_ad_backward$residuals)
+abline(h = 0, col = "red", lty = 2)
+```
+
+```{r}
+bptest(model_ad_backward)
+```
+
+> Insight: Since the p-value is less than 0.05 (Reject the $H_0$), there is heteroscedasticity in the residuals of the model. It implies that the model violates the homoscedasticity assumption. 
+
+## Multicollinearity
+
+Multicollinearity is the occurrence of a high relationship between two or more variables predictors in a multiple regression model. The linear regression technique assumes that multicollinearity should not appear in the dataset because it causes difficulty in ranking variables based on their importance. This behaviour can be observed by using VIF(Variance Inflation Factor) value. The expectation is to have a value less than 10 so that there is no multicollinearity in the model. 
+
+
+```{r}
+vif(model_ad_backward)
+```
+
+> Insight: The result suggests no multicollinearity in the variable predictors.  
+
+## Summary And Next Step 
+
+Based on the result, the model_ad_backward violates two of four assumptions for the linear regression model. In the next step, we will try to keep the linear model regression by handling two violation. 
+
+# Handling The Violation 
+
+## Normality Of Residual
+
+In this section, we will perform a transformation for the variable target. The transformation includes log, z-score, square root and maximum. The stepwise backward regression method will be used to obtain a linear regression model. The expectation is to have a p-value from `Shapiro.test()` higher than alpha (0.05). 
+
+### Log transformation 
+
+```{r}
+# Copy data frame admission and assign as new dataframe called `ad.trans`.
+ad.trans <- admission
+
+# Create a new column of Admit_trans containing transformation log of Admit. 
+ad.trans$Admit_trans <- log(ad.trans$Admit)
+
+# Drop Admit column and assign to `ad.trans`
+ad.trans <- ad.trans %>% 
+  dplyr::select(-Admit)
+
+# Build a linear regression model with all variable as predictor.
+model_trans_all <- lm(Admit_trans~., ad.trans)
+
+# Use stepwise backward method and called it as model_trans_backward.
+model_trans_backward <- step(object=model_trans_all,
+                           direction="backward",
+                           trace=0)
+
+# Observe the summary of the model
+summary(model_trans_backward)
+
+# Check p-value of shapiro.test() of the model 
+shapiro.test(model_trans_backward$residuals)
+```
+
+### Z-score Transformation
+
+```{r}
+# Copy dataframe admission and assign as new dataframe called `ad.trans1`.
+ad.trans1 <- admission
+
+# Create a new column of Admit_trans containing transformation z-score of Admit. 
+ad.trans1$Admit_trans <- scale(ad.trans1$Admit)
+
+# Drop Admit column and assign to `ad.trans1`
+ad.trans1 <- ad.trans1 %>% 
+  dplyr::select(-Admit)
+
+# Build a linear regression model with all variable as predictor.
+model_trans1_all <- lm(Admit_trans~., ad.trans1)
+
+# Use stepwise backward method and called it as model_trans1_backward.
+model_trans1_backward <- step(object=model_trans1_all,
+                           direction="backward",
+                           trace=0)
+
+# Observe the summary of the model
+summary(model_trans1_backward)
+
+# Check p-value of shapiro.test() of the model 
+shapiro.test(model_trans1_backward$residuals)
+```
+### Square Root Transformation
+
+```{r}
+# Copy dataframe admission and assign as new dataframe called `ad.trans2`.
+ad.trans2 <- admission
+
+# Create a new column of Admit_trans containing transformation square root of Admit. 
+ad.trans2$Admit_trans <- sqrt(ad.trans2$Admit)
+
+# Drop Admit and assign to `ad.trans2`
+ad.trans2 <- ad.trans2 %>% 
+  dplyr::select(-Admit)
+
+# Build a linear regression model with all variable as predictor.
+model_trans2_all <- lm(Admit_trans~., ad.trans2)
+
+# Use stepwise backward method and called it as model_trans2_backward.
+model_trans2_backward <- step(object=model_trans2_all,
+                           direction="backward",
+                           trace=0)
+
+# Observe the summary of the model
+summary(model_trans2_backward)
+
+# Check p-value of shapiro.test() of the model 
+shapiro.test(model_trans2_backward$residuals)
+
+```
+
+### Maximum Transformation 
+
+```{r}
+# Copy dataframe admission and assign as new dataframe called `ad.trans5`.
+ad.trans5 <- admission
+
+# Create a new column of Admit_trans containing max transformation of Admit. 
+ad.trans5$Admit_trans <- (ad.trans5$Admit)/max((ad.trans5$Admit))
+
+# Drop Admit and assign to `ad.trans5`
+ad.trans5 <- ad.trans5 %>% 
+  dplyr::select(-Admit)
+
+# Build a linear regression model with all variable as predictor.
+model_trans5_all <- lm(Admit_trans~., ad.trans5)
+
+# Use stepwise backward method and called it as model_trans2_backward.
+model_trans5_backward <- step(object=model_trans5_all,
+                           direction="backward",
+                           trace=0)
+
+# Observe the summary of the model
+summary(model_trans5_backward)
+
+# Check p-value of shapiro.test() of the model 
+shapiro.test(model_trans5_backward$residuals)
+```
+
+### Summary 
+
+The summary of R-squared, RMSE and p-value of shapiro test based on different transformation models. 
+
+```{r, echo=FALSE}
+
+options(scipen=0)
+
+summary2 <- list(
+  
+'Model' = c("Backward", "Y : Trans Log", "Y : Trans Z-Score", "Y : Trans Square-Root", "Y : Trans Max"),
+
+'Adj.R.squared' = c(round(summary(model_ad_backward)[[9]],4), 
+                    round(summary(model_trans_backward)[[9]],4), 
+                    round(summary(model_trans1_backward)[[9]],4), 
+                    round(summary(model_trans2_backward)[[9]],4),
+                    round(summary(model_trans5_backward)[[9]],4)),
+
+'RMSE' = c(MLmetrics::RMSE(y_pred = model_ad_backward$fitted.values, y_true = admission$Admit),
+           MLmetrics::RMSE(y_pred = model_trans_backward$fitted.values, y_true = ad.trans$Admit_trans),
+           MLmetrics::RMSE(y_pred = model_trans1_backward$fitted.values, y_true = ad.trans1$Admit_trans),
+           MLmetrics::RMSE(y_pred = model_trans2_backward$fitted.values, y_true = ad.trans2$Admit_trans),
+           MLmetrics::RMSE(y_pred = model_trans5_backward$fitted.values, y_true = ad.trans5$Admit_trans)),
+
+'Shapiro.p.value' = c(shapiro.test(model_ad_backward$residuals)[[2]], 
+                      shapiro.test(model_trans_backward$residuals)[[2]], 
+                      shapiro.test(model_trans1_backward$residuals)[[2]],  
+                      shapiro.test(model_trans2_backward$residuals)[[2]],
+                      shapiro.test(model_trans5_backward$residuals)[[2]]))
+
+summary2 <- as.data.frame(summary2)
+
+rmarkdown::paged_table(summary2)
+
+```
+> Insight: 
+>
+- Four transformations on the target variable are not capable to improve the p-value in the Shapiro test, meaning models still violate the normality of residuals. 
+- The model with the stepwise backward method is the best method among the others due to having the highest adjusted R-squared value (80.02%) and the lowest RMSE value (0.063). 
+
+## Homoscedasticity
+
+We will perform z-score and log transformations for all variable predictors. The stepwise backward regression method will be used to obtain a linear regression model. The expectation is to have a p-value from `bptest()` higher than alpha (0.05).  
+
+### Z-score transformation
+
+```{r}
+# Copy dataframe admission and assign as new dataframe called `ad.trans3`.
+ad.trans3 <- admission
+
+# Drop Admit and Research and assign to `ad.trans3`
+ad.trans3 <- ad.trans3 %>% 
+  dplyr::select(-Admit, -Research) 
+
+# Transform z-score of variable in ad.trans3 and merge with Admit_trans and Research_trans into data frame ad.trans3
+ad.trans3 <- as.data.frame(cbind(scale(ad.trans3), Admit_trans=admission$Admit,  Research_trans=admission$Research)) 
+
+# Change data type of Research as factor
+ad.trans3 <- ad.trans3 %>% 
+  mutate(Research_trans=as.factor(Research_trans))
+
+# Create a linear model regression from dataframe ad.trans3 with variable target is `Admit_trans` and variable predictor are all other variables. 
+model_trans3_all <- lm(Admit_trans~., ad.trans3)
+
+# Create a linear model regression with stepwise backward method
+model_trans3_backward <- step(object=model_trans3_all,
+                           direction="backward",
+                           trace=0)
+
+# Observe a summary of the model
+summary(model_trans3_backward)
+
+# Check the p-value from bptest() of the model
+bptest(model_trans3_backward)
+```
+
+### Log Transformation 
+
+```{r}
+# Copy dataframe admission and assign as new dataframe called `ad.trans4`.
+ad.trans4 <- admission
+
+# Drop Admit and Research and assign to `ad.trans3`
+ad.trans4 <- ad.trans4 %>% 
+  dplyr::select(-Admit, - Research) 
+
+# Transform variable inside ad.trans4 with `log()` and drop the original columns
+ad.trans4<- ad.trans4 %>% 
+  mutate(log.CGPA =log(CGPA)) %>% 
+  mutate(log.GRE.Score=log(GRE.Score)) %>% 
+  mutate(log.TOEFL.Score=log(TOEFL.Score)) %>% 
+  mutate(log.LOR=log(LOR)) %>% 
+  mutate(log.SOP=log(SOP)) %>% 
+  mutate(log.University=log(University.Rating)) %>% 
+  dplyr::select(-CGPA,-GRE.Score,-TOEFL.Score,-LOR,-University.Rating, -SOP)
+
+# Merge data frame ad.trans4 with Admit_trans and Research_trans
+ad.trans4 <- as.data.frame(cbind(ad.trans4,  Admit_trans=admission$Admit,  Research_trans=admission$Research))
+
+# Change data type of Research as factor
+ad.trans4 <- ad.trans4 %>% 
+  mutate(Research_trans=as.factor(Research_trans))
+
+# Create a linear model regression from dataframe ad.trans4 with variable target is Admit_trans and variable predictor are all other variables.
+model_trans4_all <- lm(Admit_trans~., ad.trans4)
+
+# Create a linear model regression with stepwise backward method
+model_trans4_backward <- step(object=model_trans4_all,
+                           direction="backward",
+                           trace=0)
+
+# Observe a summary of the model
+summary(model_trans4_backward)
+
+# Check the p-value from bptest() of the model
+bptest(model_trans4_backward)
+
+```
+
+### Summary 
+
+The summary of R-squared, RMSE and p-value from bptest of different models. 
+
+```{r, echo=FALSE}
+
+sum2 <- list(
+  
+'Model' = c("Backward","X : Trans Z-Scores", "X : Trans log"),
+
+Adj.R.squared = c(round(summary(model_ad_backward)[[9]],4), 
+                    round(summary(model_trans3_backward)[[9]],4), 
+                    round(summary(model_trans4_backward)[[9]],4)),
+
+RMSE = c(MLmetrics::RMSE(y_pred = model_ad_backward$fitted.values, y_true = admission$Admit),
+           MLmetrics::RMSE(y_pred = model_trans3_backward$fitted.values, y_true = ad.trans3$Admit_trans),
+           MLmetrics::RMSE(y_pred = model_trans4_backward$fitted.values, y_true = ad.trans4$Admit_trans)),
+
+Shapiro.p.value = c(shapiro.test(model_ad_backward$residuals)[[2]], 
+                    
+                      shapiro.test(model_trans3_backward$residuals)[[2]], 
+                      shapiro.test(model_trans4_backward$residuals)[[2]]),
+
+bptest.p.value =c(bptest(model_ad_backward)[[4]],
+                   
+                    bptest(model_trans3_backward)[[4]], 
+                    bptest(model_trans4_backward)[[4]]))
+
+
+sum2<- as.data.frame(sum2)
+
+rmarkdown::paged_table(sum2)
+```
+
+> Insight: 
+>
+- The transformation in variable predictors could not improve the p-value in bptest, implying the model transformation still violate the homoscedasticity. 
+- The model with stepwise backward method and model with the transformation of z-score in variable predictor are the best method among the others due to having the highest adjusted R-squared value (80.02%) and the lowest RMSE value (0.063). 
+
+## Summary And Next Step 
+
+- Transformation to variable target and variable predictors have been done to handle the normality of residuals and homoscedasticity. However, the transformation could not change the violation condition. It implies that the linear model regression is not an 'appropriate' method for predicting our target variable (chance of admit). 
+- A linear model regression with stepwise backward method (model_ad_backward) suggest being the best model due to having the highest value of adjusted R-squared value and the lowest RMSE. 
+- In the next section, we will demonstrate the quantile regression method as a comparison with the linear regression method for this data set. 
+
+# Quantile Regression 
+
+## Introduction 
+
+Quantile regression is the extension of linear regression. The method is used when we are dealing with outliers, and an absence of homoscedasticity in the dataset. Linear regression estimates the conditional mean of the target variable for given variable predictors. Since the mean does not explain the whole distribution, modelling the mean does not justify the whole description of a correlation between target and predictor. In this case, we can use quantile regression to predict a percentile (quantile) for a given variable predictors. Thus, in this poject, we could find the relationship between chance of admit (target variable) with predictors that changes depending on which quantile we look at. 
+
+Equation of quantile regression: 
+$$\hat{y} = e_i + \beta_q*xi$$
+
+where $\beta_q$ is the vector of unknown variables related with the quantile. 
+
+## Perform Modelling
+
+The modelling process follows [econometrics academy website](https://sites.google.com/site/econometricsacademy/econometrics-models/quantile-regression)
+
+We perform quantile regression by using `library(quantreg)` and function of `rq()`. Now, we create the quantile regression model with tau at 0.25, and 0.75. We only use the predictor variables that have a significant correlation with target variable.
+
+```{r warning=FALSE}
+# Create quantile regression model with tau=0.25 and assign as `model_reg_0.25`
+model_reg_0.25 <- rq(Admit~GRE.Score+TOEFL.Score+LOR+CGPA+Research, data=admission, tau=0.25)
+
+# Observe summary of the model
+summary(model_reg_0.25)
+```
+
+```{r warning=FALSE}
+# Create quantile regression model with tau=0.75 and assign as `model_reg_0.75`
+model_reg_0.75 <- rq(Admit~GRE.Score+TOEFL.Score+LOR+CGPA+Research, data=admission, tau=0.75)
+
+# Observe summary of the model
+summary(model_reg_0.75)
+```
+The summary of quantile regression model with tau at 0.25 and 0.75, and linear regression model (model_ad_backward). 
+
+```{r warning=FALSE, echo=FALSE}
+
+Model.Quantile.0.25 <- round(summary(model_reg_0.25)$coefficients[1:6],4)
+
+Model.Quantile.0.75 <- round(summary(model_reg_0.75)$coefficients[1:6],4)
+
+Model.Linear <- round(summary(model_ad_backward)$coefficients[1:6],4)
+
+Name <- c("intercept", "GRE.Score",  "TOEFL.Score", "LOR", "CGPA", "Research1")
+
+summary5 <- as.data.frame(cbind(Name, Model.Linear, Model.Quantile.0.25, Model.Quantile.0.75))
+
+rmarkdown::paged_table(summary5)
+```
+
+Interpretation: 
+
+- At quantile 0.25, one unit increase in GRE score will increase the chance of admit by 0.0025. While at quantile 0.75, one unit increase in GRE score increases the chance of admit by 0.00067.  In another word, the effect of GRE score reduces for a higher chance of admit (higher quantile).
+- At quantile 0.25, one unit increase in TOEFL score will increase the chance of admit by 0.0026. While at quantile 0.75, one unit increase in TOEFL score increases the chance of admit by 0.0039. In another word, the effect of TOEFL scores increases for a higher chance of admit (higher quantile).
+- At quantile 0.25, one unit increase in LOR will increase the chance of admit by 0.0287. While at quantile 0.75, one unit increase in LOR increases the chance of admit by 0.0181. In another word, the effect of LOR reduces for a higher chance of admit (higher quantile).
+- At quantile 0.25, one unit increase in LOR will increase the chance of admit by 0.1191. While at quantile 0.75, one unit increase in LOR increases the chance of admit by 0.1134. In another word, the effect of LOR reduces for a higher chance of admit (higher quantile).
+- At quantile 0.25, one unit increase in Research1 will increase the chance of admit by 0.0168. While at quantile 0.75, one unit increase in LOR increases the chance of admit by 0.0246. 
+
+## Assumption
+
+In this assumption, we would like to check if the models with different tau obtain different coefficients. The expectation is to have a p-value less than alpha (p-value < 0.05) so that we will reject the $H_0$. We will use `anova()` to check the p-value of all variable predictors. The hypothesis test: 
+
+$$
+H_0: There\ is\ not\ different\\
+H_1: There\ is\  different\
+$$
+
+```{r warning=FALSE}
+
+anova(model_reg_0.25, model_reg_0.75)
+```
+> Insight: p-value shows a signifant value, implying that the slope or coefficient is different in two models. 
+
+## Summary 
+
+Let's create the plot to observe the different effects along the distribution of the target variables. 
+
+```{r warning=FALSE}
+# Create a quantile regression model. 
+model_reg <- rq(Admit~GRE.Score+TOEFL.Score+LOR+CGPA+Research, data=admission, tau=seq(0.1, 0.9, by=0.1))
+
+# Plot the model 
+plot(summary(model_reg))
+```
+
+- The black line shows the estimated quantile regression coefficient, plotted as a line varying across the quantiles with their confidence intervals(the light grey area).
+- The red line is the estimated ordinary least squares (OLS) coefficient with its confidence interval.
+- If the quantile regression coefficient is outside the OLS confidence interval, then there is a significant difference between OLS and quantile coefficient. 
+- The quantile coefficients for intercept are slightly different from the OLS coefficients, especially in a lower quantile (0.1 and 0.3) and a higher quantile (0.6 and 0.9). 
+- For the GRE Score, the differences are only valid in the higher quantile (0.8 and 0.9).
+- In other plots (LOR, CGPA, TOEFL score and Research1), it appears the linear regression coefficient is sufficient to describe the relationship between these variables and the target. The quantile coefficient estimates are not statistically different from the OLS estimate.
+
+
+# Conclusions
+
+- Linear regression method has been performed to predict the chance of admission to a Master's program in university. 
+- GRE score, TOEFL score, CGPA, letter of settlement and Research have a significant influence on the target variable. 
+- Each variable predictors have a strong positive relationship with each other. 
+- The prediction of the chance of admit by using the linear regression method shows that the model with the backward stepwise method is the best model due to having the highest value of an adjusted R-squared and the lowest value of error (RMSE). However, the linear regression method is not the most 'appropriate' method for this dataset because the model violates two assumptions (error of normality and homoscedasticity). 
+- The transformation on target and predictor has been done. However, it does not change the violation of the linear regression assumption. Further analysis with other regression methods should be carried out to find the best model to predict the chance of admission for this data set.
+- The quantile regression model is used to find the relationship between target and predictors that changes depending on which quantile we look at. 
+- Only quantile coefficients for intercept and GRE Score have differences from the estimated OLS coefficients. While for the other variables, the linear regression coefficient is sufficient to describe the relationship between target and predictor. 
+
+
+# References 
+
+- [Econometrics Academy](https://sites.google.com/site/econometricsacademy/econometrics-models/quantile-regression)
+- [Investopedia](https://www.investopedia.com)
+- [Quantile Regression Analysis](https://isdsnet.com/ijds-v4n5-1.pdf)
+- [The Kaggle Website](https://www.kaggle.com/mohansacharya/graduate-admissions)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
